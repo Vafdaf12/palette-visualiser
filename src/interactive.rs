@@ -2,6 +2,8 @@ use image::{Rgb, RgbImage};
 use kolor::ColorConversion;
 use raylib::prelude::*;
 
+use crate::{VoxelMap, VoxelPoint};
+
 const SCALE: f32 = 100.0;
 
 fn round_to_nearest(value: f32, step: f32) -> f32 {
@@ -12,10 +14,9 @@ fn round_to_nearest(value: f32, step: f32) -> f32 {
     }
 }
 
-pub fn compute_palette(image: &RgbImage, voxel_size: f32) -> Vec<(Color, Vector3)> {
+pub fn compute_palette(image: &RgbImage, voxel_size: f32) -> VoxelMap<Color> {
+    let mut map: VoxelMap<Color> = VoxelMap::new();
     let lab = ColorConversion::new(kolor::spaces::LINEAR_SRGB, kolor::spaces::OKLAB);
-
-    let mut points: Vec<(Color, Vector3)> = Vec::new();
 
     for Rgb([r, g, b]) in image.pixels() {
         let color = Color::new(*r, *g, *b, 255);
@@ -27,18 +28,18 @@ pub fn compute_palette(image: &RgbImage, voxel_size: f32) -> Vec<(Color, Vector3
         ));
         let mut pos = Vector3::new(c.y, c.x, c.z) * SCALE;
 
-        pos.x = round_to_nearest(pos.x, voxel_size);
-        pos.y = round_to_nearest(pos.y, voxel_size);
-        pos.z = round_to_nearest(pos.z, voxel_size);
+        pos.x = (pos.x / voxel_size).round();
+        pos.y = (pos.y / voxel_size).round();
+        pos.z = (pos.z / voxel_size).round();
 
-        let exists = points.iter().map(|(_, p)| *p).any(|p| p == pos);
+        let point = VoxelPoint(pos.x as i32, pos.y as i32, pos.z as i32);
 
-        if !exists {
-            points.push((color, pos));
+        if !map.check_pos(&point) {
+            map.put(point, color);
         }
     }
 
-    points
+    map
 }
 
 pub fn run(image: &RgbImage, voxel_size: f32) {
@@ -49,15 +50,10 @@ pub fn run(image: &RgbImage, voxel_size: f32) {
         image.height(),
         image.width() * image.height()
     );
-    println!("Palette Size: {}", palette.len());
+    println!("Palette Size: {}", palette.map.keys().len());
 
-    let center: Vector3 = palette
-        .clone()
-        .into_iter()
-        .map(|(_, p)| p)
-        .reduce(|a, b| a + b)
-        .unwrap()
-        / palette.len() as f32;
+
+    
     raylib::set_trace_log(TraceLogLevel::LOG_WARNING);
     let (mut rl, thread) = raylib::init()
         .size(800, 600)
@@ -66,12 +62,12 @@ pub fn run(image: &RgbImage, voxel_size: f32) {
         .build();
 
     let mut camera = Camera3D::perspective(
-        center + Vector3::right() * SCALE,
-        center,
+        Vector3::right() * SCALE,
+        Vector3::zero(),
         Vector3::new(0.0, 1.0, 0.0),
         45.0,
     );
-    rl.set_camera_mode(camera, CameraMode::CAMERA_ORBITAL);
+    rl.set_camera_mode(camera, CameraMode::CAMERA_FREE);
     rl.set_target_fps(60);
 
     while !rl.window_should_close() {
@@ -83,9 +79,12 @@ pub fn run(image: &RgbImage, voxel_size: f32) {
         {
             let mut d2 = d.begin_mode3D(camera);
 
-            for (col, pos) in palette.iter() {
-                d2.draw_cube_v(*pos, Vector3::one() * voxel_size, col);
+            for (&pos, col) in palette.map.iter() {
+                
+
+                d2.draw_cube_v(pos, Vector3::one(), col);
             }
+
         }
     }
 }
